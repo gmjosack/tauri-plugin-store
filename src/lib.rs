@@ -68,6 +68,7 @@ async fn set<R: Runtime>(
 ) -> Result<(), Error> {
   with_store(&app, stores, path.clone(), |store| {
     store.cache.insert(key.clone(), value.clone());
+    store.update_watcher();
     let _ = window.emit("store://change", ChangePayload { path, key, value });
     Ok(())
   })
@@ -107,6 +108,7 @@ async fn delete<R: Runtime>(
 ) -> Result<bool, Error> {
   with_store(&app, stores, path.clone(), |store| {
     let flag = store.cache.remove(&key).is_some();
+    store.update_watcher();
     if flag {
       let _ = window.emit(
         "store://change",
@@ -131,6 +133,7 @@ async fn clear<R: Runtime>(
   with_store(&app, stores, path.clone(), |store| {
     let keys = store.cache.keys().cloned().collect::<Vec<String>>();
     store.cache.clear();
+    store.update_watcher();
     for key in keys {
       let _ = window.emit(
         "store://change",
@@ -175,6 +178,7 @@ async fn reset<R: Runtime>(
           }
         }
         store.cache = defaults.clone();
+        store.update_watcher();
       }
       Ok(())
     })

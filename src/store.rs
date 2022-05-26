@@ -11,6 +11,7 @@ use std::{
   path::PathBuf,
 };
 use tauri::{AppHandle, Runtime};
+use tokio::sync::watch;
 
 type SerializeFn = fn(&HashMap<String, JsonValue>) -> Result<Vec<u8>, Box<dyn std::error::Error>>;
 type DeserializeFn = fn(&[u8]) -> Result<HashMap<String, JsonValue>, Box<dyn std::error::Error>>;
@@ -155,17 +156,18 @@ impl StoreBuilder {
       cache: self.cache,
       serialize: self.serialize,
       deserialize: self.deserialize,
+      watcher: None,
     }
   }
 }
 
-#[derive(Clone)]
 pub struct Store {
   pub(crate) path: PathBuf,
   pub(crate) defaults: Option<HashMap<String, JsonValue>>,
   pub(crate) cache: HashMap<String, JsonValue>,
   serialize: SerializeFn,
   deserialize: DeserializeFn,
+  watcher: Option<watch::Sender<HashMap<String, JsonValue>>>,
 }
 
 impl Store {
@@ -180,6 +182,7 @@ impl Store {
     let bytes = read(&store_path)?;
 
     self.cache = (self.deserialize)(&bytes).map_err(Error::Deserialize)?;
+    self.update_watcher();
 
     Ok(())
   }
@@ -199,6 +202,26 @@ impl Store {
     f.write_all(&bytes)?;
 
     Ok(())
+  }
+
+  /// Returns a watch::Receiver to monitor changes to the store
+  pub fn get_watcher(&mut self) -> watch::Receiver<HashMap<String, JsonValue>> {
+    if let Some(watcher) = &self.watcher {
+      return watcher.subscribe();
+    }
+
+    let (tx, rx) = watch::channel(self.cache.clone());
+    self.watcher = Some(tx);
+    rx
+  }
+
+  pub(crate) fn update_watcher(&mut self) {
+    if let Some(watcher) = &self.watcher {
+      if let Err(_) = watcher.send(self.cache.clone()) {
+        // No receivers, no need to continue updating.
+        self.watcher = None;
+      }
+    }
   }
 }
 
